@@ -1,46 +1,46 @@
--- ============================================================
--- 부름이 Pro
+﻿-- ============================================================
+-- 遺由꾩씠 Pro
 -- Supabase Security v2
 -- ============================================================
--- 권한 구조
+-- 沅뚰븳 援ъ“
 --
 -- MASTER
---   users              전체
---   drivers            전체
---   driver_locations   전체 GPS
---   orders             전체
---   order_routes       전체
---   order_photos       전체
---   order_assignments  전체
---   order_history      전체
---   notifications      전체
+--   users              ?꾩껜
+--   drivers            ?꾩껜
+--   driver_locations   ?꾩껜 GPS
+--   orders             ?꾩껜
+--   order_routes       ?꾩껜
+--   order_photos       ?꾩껜
+--   order_assignments  ?꾩껜
+--   order_history      ?꾩껜
+--   notifications      ?꾩껜
 --
 -- SUBMASTER
---   users              필요한 사용자 정보
---   drivers            기사 기본정보
---   driver_locations   접근 금지
---   orders             접근 가능 오더
---   order_routes       접근 가능 오더
---   order_photos       접근 가능 오더
---   order_assignments  접근 가능 오더
---   order_history      접근 가능 오더
---   notifications      자기 알림
+--   users              ?꾩슂???ъ슜???뺣낫
+--   drivers            湲곗궗 湲곕낯?뺣낫
+--   driver_locations   ?묎렐 湲덉?
+--   orders             ?묎렐 媛???ㅻ뜑
+--   order_routes       ?묎렐 媛???ㅻ뜑
+--   order_photos       ?묎렐 媛???ㅻ뜑
+--   order_assignments  ?묎렐 媛???ㅻ뜑
+--   order_history      ?묎렐 媛???ㅻ뜑
+--   notifications      ?먭린 ?뚮┝
 --
 -- DRIVER
---   users              자기 정보
---   drivers            자기 정보
---   driver_locations   자기 GPS
---   orders             자신에게 배정된 오더
---   order_routes       자신에게 배정된 오더
---   order_photos       자신에게 배정된 오더
---   order_assignments  자신의 배차
---   order_history      자신에게 관련된 오더
---   notifications      자기 알림
+--   users              ?먭린 ?뺣낫
+--   drivers            ?먭린 ?뺣낫
+--   driver_locations   ?먭린 GPS
+--   orders             ?먯떊?먭쾶 諛곗젙???ㅻ뜑
+--   order_routes       ?먯떊?먭쾶 諛곗젙???ㅻ뜑
+--   order_photos       ?먯떊?먭쾶 諛곗젙???ㅻ뜑
+--   order_assignments  ?먯떊??諛곗감
+--   order_history      ?먯떊?먭쾶 愿?⑤맂 ?ㅻ뜑
+--   notifications      ?먭린 ?뚮┝
 --
--- 중요:
--- PostgreSQL RLS는 행 단위 보안이므로
--- GPS를 별도 driver_locations 테이블로 분리하여
--- SUBMASTER가 GPS 컬럼 자체에 접근할 수 없도록 구성한다.
+-- 以묒슂:
+-- PostgreSQL RLS?????⑥쐞 蹂댁븞?대?濡?
+-- GPS瑜?蹂꾨룄 driver_locations ?뚯씠釉붾줈 遺꾨━?섏뿬
+-- SUBMASTER媛 GPS 而щ읆 ?먯껜???묎렐?????녿룄濡?援ъ꽦?쒕떎.
 -- ============================================================
 
 
@@ -52,7 +52,7 @@ create schema if not exists private;
 
 
 -- ============================================================
--- 2. 현재 로그인 사용자 ID
+-- 2. ?꾩옱 濡쒓렇???ъ슜??ID
 -- ============================================================
 
 create or replace function private.current_user_id()
@@ -71,7 +71,7 @@ $$;
 
 
 -- ============================================================
--- 3. 현재 로그인 사용자 ROLE
+-- 3. ?꾩옱 濡쒓렇???ъ슜??ROLE
 -- ============================================================
 
 create or replace function private.current_user_role()
@@ -90,7 +90,7 @@ $$;
 
 
 -- ============================================================
--- 4. MASTER 여부
+-- 4. MASTER ?щ?
 -- ============================================================
 
 create or replace function private.is_master()
@@ -108,7 +108,7 @@ $$;
 
 
 -- ============================================================
--- 5. SUBMASTER 여부
+-- 5. SUBMASTER ?щ?
 -- ============================================================
 
 create or replace function private.is_submaster()
@@ -145,7 +145,7 @@ $$;
 
 
 -- ============================================================
--- 7. 현재 로그인 DRIVER ID
+-- 7. ?꾩옱 濡쒓렇??DRIVER ID
 -- ============================================================
 
 create or replace function private.current_driver_id()
@@ -163,7 +163,7 @@ $$;
 
 
 -- ============================================================
--- 8. FUNCTION 권한
+-- 8. FUNCTION 沅뚰븳
 -- ============================================================
 
 grant usage on schema private to authenticated;
@@ -188,7 +188,7 @@ to authenticated;
 
 
 -- ============================================================
--- 9. RLS 활성화
+-- 9. RLS ?쒖꽦??
 -- ============================================================
 
 alter table public.users enable row level security;
@@ -211,7 +211,7 @@ alter table public.notifications enable row level security;
 
 
 -- ============================================================
--- 10. 기존 정책 제거
+-- 10. 湲곗〈 ?뺤콉 ?쒓굅
 -- ============================================================
 
 -- USERS
@@ -380,12 +380,12 @@ using (
 -- ============================================================
 -- 12. DRIVERS
 -- ============================================================
--- MASTER: 전체
--- SUBMASTER: 전체 기사 기본정보
--- DRIVER: 자기 정보
+-- MASTER: ?꾩껜
+-- SUBMASTER: ?꾩껜 湲곗궗 湲곕낯?뺣낫
+-- DRIVER: ?먭린 ?뺣낫
 --
--- GPS 컬럼이 없기 때문에
--- SUBMASTER가 이 테이블을 조회해도 GPS 노출 없음.
+-- GPS 而щ읆???녾린 ?뚮Ц??
+-- SUBMASTER媛 ???뚯씠釉붿쓣 議고쉶?대룄 GPS ?몄텧 ?놁쓬.
 -- ============================================================
 
 create policy drivers_select_policy
@@ -431,9 +431,9 @@ using (
 -- ============================================================
 -- 13. DRIVER LOCATIONS
 -- ============================================================
--- MASTER: 전체 GPS
--- DRIVER: 자기 GPS
--- SUBMASTER: 완전 차단
+-- MASTER: ?꾩껜 GPS
+-- DRIVER: ?먭린 GPS
+-- SUBMASTER: ?꾩쟾 李⑤떒
 -- ============================================================
 
 create policy driver_locations_select_policy
@@ -480,10 +480,10 @@ using (
 -- 14. ORDERS
 -- ============================================================
 -- MASTER + SUBMASTER:
--- 전체 오더 관리
+-- ?꾩껜 ?ㅻ뜑 愿由?
 --
 -- DRIVER:
--- 자신에게 배정된 오더만
+-- ?먯떊?먭쾶 諛곗젙???ㅻ뜑留?
 -- ============================================================
 
 create policy orders_select_policy
@@ -708,7 +708,7 @@ for insert
 to authenticated
 with check (
     private.is_control_user()
-    or actor_user_id = private.current_user_id()
+    or user_id = private.current_user_id()
 );
 
 
@@ -757,7 +757,7 @@ using (
 
 
 -- ============================================================
--- 20. TABLE 권한
+-- 20. TABLE 沅뚰븳
 -- ============================================================
 
 revoke all on public.users from anon;

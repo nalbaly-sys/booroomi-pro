@@ -1,35 +1,37 @@
-﻿-- =========================================================
--- 부름이 Pro Database Schema v2
--- PostgreSQL / Supabase
---
--- 역할
--- MASTER    : 전체 관제 + SUBMASTER 전달 + 직접 기사 배차
--- SUBMASTER : MASTER와 동일한 관제/오더/배차 기능
--- DRIVER    : 본인 배송업무
---
--- MASTER와 SUBMASTER의 차이
--- 1. MASTER만 SUBMASTER에게 오더 전달 가능
--- 2. MASTER만 전체 기사 위치 지도 조회 가능
--- =========================================================
+﻿-- ============================================================
+-- 부름이 Pro Database Schema v3
+-- ============================================================
+-- 원칙
+-- 1. Master / Submaster / Driver 구조
+-- 2. GPS 위치정보는 drivers와 분리
+-- 3. Master만 전체 GPS 조회 가능
+-- 4. Submaster는 기사 기본정보만 조회
+-- 5. Driver는 자기 정보/자기 GPS만 접근
+-- ============================================================
+
+
+-- ============================================================
+-- EXTENSIONS
+-- ============================================================
 
 create extension if not exists pgcrypto;
 
--- =========================================================
--- USERS
--- =========================================================
 
-create table if not exists users (
+-- ============================================================
+-- USERS
+-- ============================================================
+
+create table if not exists public.users (
     id uuid primary key default gen_random_uuid(),
 
-    -- Supabase Auth 사용자 ID
     auth_user_id uuid unique,
 
-    login_id varchar(100) unique not null,
-    name varchar(100) not null,
-    phone varchar(30),
+    login_id text not null unique,
+    name text not null,
+    phone text,
 
-    role varchar(20) not null default 'DRIVER'
-        check (role in ('MASTER', 'SUBMASTER', 'DRIVER')),
+    role text not null
+        check (role in ('master', 'submaster', 'driver')),
 
     is_active boolean not null default true,
 
@@ -37,85 +39,89 @@ create table if not exists users (
     updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_users_auth_user_id
-    on users(auth_user_id);
 
-create index if not exists idx_users_role
-    on users(role);
-
--- =========================================================
+-- ============================================================
 -- DRIVERS
--- =========================================================
+-- 기사 기본정보
+-- GPS 정보는 driver_locations로 분리
+-- ============================================================
 
-create table if not exists drivers (
+create table if not exists public.drivers (
     id uuid primary key default gen_random_uuid(),
 
     user_id uuid not null unique
-        references users(id)
-        on delete restrict,
+        references public.users(id)
+        on delete cascade,
 
-    driver_code varchar(100) unique not null,
+    driver_code text not null unique,
 
-    work_status varchar(30) not null default 'OFF'
-        check (work_status in ('OFF', 'WORKING', 'BREAK')),
+    work_status text not null default '퇴근함'
+        check (work_status in ('근무중', '퇴근함')),
 
-    latitude numeric(10,7),
-    longitude numeric(10,7),
-
-    location_updated_at timestamptz,
     last_access_at timestamptz,
 
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_drivers_work_status
-    on drivers(work_status);
 
-create index if not exists idx_drivers_location_updated
-    on drivers(location_updated_at desc);
+-- ============================================================
+-- DRIVER LOCATIONS
+-- 기사 GPS 전용 테이블
+-- ============================================================
 
--- =========================================================
--- ORDERS
--- =========================================================
-
-create table if not exists orders (
+create table if not exists public.driver_locations (
     id uuid primary key default gen_random_uuid(),
 
-    -- 화면에 표시할 오더번호
-    order_number varchar(50) unique not null,
+    driver_id uuid not null unique
+        references public.drivers(id)
+        on delete cascade,
 
-    -- 최초 오더 작성자
-    registered_by uuid
-        references users(id)
-        on delete set null,
+    latitude numeric(10,7),
+    longitude numeric(10,7),
 
-    -- MASTER가 SUBMASTER에게 전달한 경우
+    location_updated_at timestamptz,
+
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+
+-- ============================================================
+-- ORDERS
+-- ============================================================
+
+create table if not exists public.orders (
+    id uuid primary key default gen_random_uuid(),
+
+    order_number text not null unique,
+
+    registered_by uuid not null
+        references public.users(id),
+
     delegated_to_user_id uuid
-        references users(id)
-        on delete set null,
+        references public.users(id),
 
-    product_name varchar(255) not null,
+    product_name text not null,
 
-    -- 지정배차 / 선착순배차
-    dispatch_type varchar(30) not null
-        check (dispatch_type in ('DESIGNATED', 'FIRST_COME')),
+    dispatch_type text not null
+        check (dispatch_type in ('지정배차', '선착순배차')),
 
-    -- 현재 담당 기사
     assigned_driver_id uuid
-        references drivers(id)
-        on delete set null,
+        references public.drivers(id),
 
-    order_status varchar(30) not null default 'PENDING'
-        check (order_status in (
-            'PENDING',
-            'DISPATCHING',
-            'ASSIGNED',
-            'ACCEPTED',
-            'IN_PROGRESS',
-            'COMPLETED',
-            'CANCELLED'
-        )),
+    order_status text not null default '접수'
+        check (
+            order_status in (
+                '접수',
+                '배차대기',
+                '배차중',
+                '배차완료',
+                '배송중',
+                '배송완료',
+                '취소'
+            )
+        ),
 
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -124,220 +130,164 @@ create table if not exists orders (
     cancelled_at timestamptz
 );
 
-create index if not exists idx_orders_created_at
-    on orders(created_at desc);
 
-create index if not exists idx_orders_status
-    on orders(order_status);
-
-create index if not exists idx_orders_driver
-    on orders(assigned_driver_id);
-
-create index if not exists idx_orders_registered_by
-    on orders(registered_by);
-
-create index if not exists idx_orders_delegated_to
-    on orders(delegated_to_user_id);
-
--- =========================================================
+-- ============================================================
 -- ORDER ROUTES
--- =========================================================
+-- ============================================================
 
-create table if not exists order_routes (
+create table if not exists public.order_routes (
     id uuid primary key default gen_random_uuid(),
 
     order_id uuid not null
-        references orders(id)
+        references public.orders(id)
         on delete cascade,
 
-    sequence integer not null,
+    route_order integer not null,
 
     address text not null,
 
     latitude numeric(10,7),
     longitude numeric(10,7),
 
-    route_status varchar(30) not null default 'UNKNOWN'
-        check (route_status in (
-            'UNKNOWN',
-            'NOT_PICKED_UP',
-            'PICKED_UP',
-            'IN_DELIVERY',
-            'DELIVERED'
-        )),
-
-    picked_up_at timestamptz,
-    delivered_at timestamptz,
+    route_status text not null default '미확인'
+        check (
+            route_status in (
+                '미확인',
+                '미픽업',
+                '픽업완료',
+                '배송중',
+                '배송완료'
+            )
+        ),
 
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
 
-    unique(order_id, sequence)
+    unique(order_id, route_order)
 );
 
-create index if not exists idx_order_routes_order
-    on order_routes(order_id, sequence);
 
--- =========================================================
+-- ============================================================
 -- ORDER PHOTOS
--- =========================================================
+-- ============================================================
 
-create table if not exists order_photos (
+create table if not exists public.order_photos (
     id uuid primary key default gen_random_uuid(),
 
     order_id uuid not null
-        references orders(id)
+        references public.orders(id)
         on delete cascade,
-
-    route_id uuid
-        references order_routes(id)
-        on delete set null,
 
     storage_path text not null,
 
-    file_name varchar(255),
-
-    photo_type varchar(30) not null default 'ORDER',
+    original_filename text,
 
     created_by uuid
-        references users(id)
-        on delete set null,
+        references public.users(id),
 
     created_at timestamptz not null default now()
 );
 
-create index if not exists idx_order_photos_order
-    on order_photos(order_id);
 
-create index if not exists idx_order_photos_route
-    on order_photos(route_id);
-
--- =========================================================
+-- ============================================================
 -- ORDER ASSIGNMENTS
--- 배차/수락/거절/재배차 이력
--- =========================================================
+-- 배차 / 수락 / 거절 / 재배차 이력
+-- ============================================================
 
-create table if not exists order_assignments (
+create table if not exists public.order_assignments (
     id uuid primary key default gen_random_uuid(),
 
     order_id uuid not null
-        references orders(id)
+        references public.orders(id)
         on delete cascade,
 
     driver_id uuid not null
-        references drivers(id)
-        on delete restrict,
+        references public.drivers(id),
 
-    -- 배차를 실행한 사용자
     assigned_by uuid
-        references users(id)
-        on delete set null,
+        references public.users(id),
 
-    assignment_type varchar(30) not null
-        check (assignment_type in (
-            'DESIGNATED',
-            'FIRST_COME',
-            'REDISPATCH'
-        )),
+    assignment_type text not null
+        check (
+            assignment_type in (
+                '지정배차',
+                '선착순배차',
+                '재배차'
+            )
+        ),
 
-    status varchar(30) not null default 'PENDING'
-        check (status in (
-            'PENDING',
-            'ACCEPTED',
-            'REJECTED',
-            'CANCELLED',
-            'EXPIRED'
-        )),
+    assignment_status text not null default '대기'
+        check (
+            assignment_status in (
+                '대기',
+                '수락',
+                '거절',
+                '취소',
+                '완료'
+            )
+        ),
 
     assigned_at timestamptz not null default now(),
-
-    responded_at timestamptz,
-
-    rejected_at timestamptz,
-
-    rejection_reason text
+    responded_at timestamptz
 );
 
-create index if not exists idx_order_assignments_order
-    on order_assignments(order_id);
 
-create index if not exists idx_order_assignments_driver
-    on order_assignments(driver_id);
-
-create index if not exists idx_order_assignments_assigned_by
-    on order_assignments(assigned_by);
-
--- =========================================================
+-- ============================================================
 -- ORDER HISTORY
--- 오더 생성/수정/전달/배차/상태변경 기록
--- =========================================================
+-- 모든 주요 작업 기록
+-- ============================================================
 
-create table if not exists order_history (
+create table if not exists public.order_history (
     id uuid primary key default gen_random_uuid(),
 
     order_id uuid not null
-        references orders(id)
+        references public.orders(id)
         on delete cascade,
 
-    -- 작업을 실행한 사용자
-    user_id uuid
-        references users(id)
-        on delete set null,
+    action text not null,
 
-    action varchar(50) not null,
+    actor_user_id uuid
+        references public.users(id),
 
     before_data jsonb,
-
     after_data jsonb,
 
     created_at timestamptz not null default now()
 );
 
-create index if not exists idx_order_history_order
-    on order_history(order_id, created_at desc);
 
-create index if not exists idx_order_history_user
-    on order_history(user_id, created_at desc);
-
--- =========================================================
+-- ============================================================
 -- NOTIFICATIONS
--- =========================================================
+-- ============================================================
 
-create table if not exists notifications (
+create table if not exists public.notifications (
     id uuid primary key default gen_random_uuid(),
 
-    user_id uuid
-        references users(id)
+    user_id uuid not null
+        references public.users(id)
         on delete cascade,
 
     order_id uuid
-        references orders(id)
+        references public.orders(id)
         on delete cascade,
 
-    notification_type varchar(50) not null,
+    notification_type text not null,
 
-    title varchar(255) not null,
-
+    title text,
     message text,
 
     is_read boolean not null default false,
 
     created_at timestamptz not null default now(),
-
     read_at timestamptz
 );
 
-create index if not exists idx_notifications_user
-    on notifications(user_id, created_at desc);
 
-create index if not exists idx_notifications_order
-    on notifications(order_id);
+-- ============================================================
+-- UPDATED_AT TRIGGER FUNCTION
+-- ============================================================
 
--- =========================================================
--- UPDATED_AT TRIGGER
--- =========================================================
-
-create or replace function set_updated_at()
+create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
 as $$
@@ -347,34 +297,150 @@ begin
 end;
 $$;
 
-drop trigger if exists users_set_updated_at on users;
 
-create trigger users_set_updated_at
-before update on users
+-- ============================================================
+-- TRIGGERS
+-- ============================================================
+
+drop trigger if exists trg_users_updated_at
+on public.users;
+
+create trigger trg_users_updated_at
+before update on public.users
 for each row
-execute function set_updated_at();
+execute function public.set_updated_at();
 
-drop trigger if exists drivers_set_updated_at on drivers;
 
-create trigger drivers_set_updated_at
-before update on drivers
+drop trigger if exists trg_drivers_updated_at
+on public.drivers;
+
+create trigger trg_drivers_updated_at
+before update on public.drivers
 for each row
-execute function set_updated_at();
+execute function public.set_updated_at();
 
-drop trigger if exists orders_set_updated_at on orders;
 
-create trigger orders_set_updated_at
-before update on orders
+drop trigger if exists trg_driver_locations_updated_at
+on public.driver_locations;
+
+create trigger trg_driver_locations_updated_at
+before update on public.driver_locations
 for each row
-execute function set_updated_at();
+execute function public.set_updated_at();
 
-drop trigger if exists order_routes_set_updated_at on order_routes;
 
-create trigger order_routes_set_updated_at
-before update on order_routes
+drop trigger if exists trg_orders_updated_at
+on public.orders;
+
+create trigger trg_orders_updated_at
+before update on public.orders
 for each row
-execute function set_updated_at();
+execute function public.set_updated_at();
 
--- =========================================================
+
+drop trigger if exists trg_order_routes_updated_at
+on public.order_routes;
+
+create trigger trg_order_routes_updated_at
+before update on public.order_routes
+for each row
+execute function public.set_updated_at();
+
+
+-- ============================================================
+-- INDEXES
+-- ============================================================
+
+create index if not exists idx_users_role
+on public.users(role);
+
+create index if not exists idx_users_active
+on public.users(is_active);
+
+create index if not exists idx_drivers_user_id
+on public.drivers(user_id);
+
+create index if not exists idx_drivers_work_status
+on public.drivers(work_status);
+
+create index if not exists idx_driver_locations_driver_id
+on public.driver_locations(driver_id);
+
+create index if not exists idx_driver_locations_updated
+on public.driver_locations(location_updated_at);
+
+create index if not exists idx_orders_registered_by
+on public.orders(registered_by);
+
+create index if not exists idx_orders_delegated_to
+on public.orders(delegated_to_user_id);
+
+create index if not exists idx_orders_driver
+on public.orders(assigned_driver_id);
+
+create index if not exists idx_orders_status
+on public.orders(order_status);
+
+create index if not exists idx_orders_created_at
+on public.orders(created_at desc);
+
+create index if not exists idx_order_routes_order
+on public.order_routes(order_id);
+
+create index if not exists idx_order_photos_order
+on public.order_photos(order_id);
+
+create index if not exists idx_order_assignments_order
+on public.order_assignments(order_id);
+
+create index if not exists idx_order_assignments_driver
+on public.order_assignments(driver_id);
+
+create index if not exists idx_order_history_order
+on public.order_history(order_id);
+
+create index if not exists idx_notifications_user
+on public.notifications(user_id);
+
+create index if not exists idx_notifications_order
+on public.notifications(order_id);
+
+create index if not exists idx_notifications_unread
+on public.notifications(user_id, is_read);
+
+
+-- ============================================================
+-- COMMENTS
+-- ============================================================
+
+comment on table public.users is
+'부름이 Pro 사용자 계정 및 권한 정보';
+
+comment on table public.drivers is
+'기사 기본정보 및 근무상태';
+
+comment on table public.driver_locations is
+'기사 GPS 위치정보. 권한에 따라 접근 제한';
+
+comment on table public.orders is
+'꽃배달 오더 기본정보';
+
+comment on table public.order_routes is
+'오더별 배송 경로';
+
+comment on table public.order_photos is
+'오더 사진 Storage 경로';
+
+comment on table public.order_assignments is
+'배차 및 수락/거절/재배차 이력';
+
+comment on table public.order_history is
+'오더 변경 이력';
+
+comment on table public.notifications is
+'사용자 알림';
+
+
+-- ============================================================
 -- END
--- =========================================================
+-- ============================================================

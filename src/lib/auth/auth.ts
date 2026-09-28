@@ -3,65 +3,39 @@ import { createClient } from "@supabase/supabase-js";
 export const SUPABASE_URL = "https://enwyqdekqfpuurutqjdd.supabase.co";
 export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-);
+export const supabase = createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
-export function loginEmailFromLoginId(loginId: string): string {
+export function loginEmailFromLoginId(loginId:string):string{
   return `${loginId.trim().toLowerCase()}@auth.booroomi.internal`;
 }
 
-export async function loginWithLoginId(
-  loginId: string,
-  password: string,
-) {
-  const email = loginEmailFromLoginId(loginId);
+export async function loginWithLoginId(loginId:string,password:string){
+  const email=loginEmailFromLoginId(loginId);
+  const {data,error}=await supabase.auth.signInWithPassword({email,password});
+  if(error) throw new Error("ë¡œê·¸ì¸ ID ë˜ëŠ” ë¹„ë°€ë²ˆí˜¸ê°€ ì˜¬ë°”ë¥´ì§€ ì•ŠìŠµë‹ˆë‹¤.");
+  if(!data.user) throw new Error("ë¡œê·¸ì¸ ì •ë³´ë¥¼ í™•ì¸í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤.");
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  const {data:profile,error:profileError}=await supabase.from("users").select("id,auth_user_id,login_id,name,phone,role,is_active").eq("auth_user_id",data.user.id).maybeSingle();
 
-  if (error) {
-    throw new Error("·Î±×ÀÎ ID ¶Ç´Â ºñ¹Ğ¹øÈ£°¡ ¿Ã¹Ù¸£Áö ¾Ê½À´Ï´Ù.");
-  }
-
-  if (!data.user) {
-    throw new Error("·Î±×ÀÎ Á¤º¸¸¦ È®ÀÎÇÒ ¼ö ¾ø½À´Ï´Ù.");
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("users")
-    .select("id, auth_user_id, login_id, name, phone, role, is_active")
-    .eq("auth_user_id", data.user.id)
-    .maybeSingle();
-
-  if (profileError) {
+  if(profileError){
     await supabase.auth.signOut();
-    throw new Error("»ç¿ëÀÚ Á¤º¸¸¦ È®ÀÎÇÏ´Â Áß ¿À·ù°¡ ¹ß»ıÇß½À´Ï´Ù.");
+    throw new Error("ì‚¬ìš©ì ì •ë³´ë¥¼ í™•ì¸í•˜ëŠ” ì¤‘ ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.");
   }
 
-  if (!profile) {
+  if(!profile){
     await supabase.auth.signOut();
-    throw new Error("µî·ÏµÈ »ç¿ëÀÚ Á¤º¸¸¦ Ã£À» ¼ö ¾ø½À´Ï´Ù.");
+    throw new Error("ë“±ë¡ëœ ì‚¬ìš©ì ì •ë³´ë¥¼ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.");
   }
 
-  if (!profile.is_active) {
+  if(!profile.is_active){
     await supabase.auth.signOut();
-    throw new Error("ºñÈ°¼ºÈ­µÈ °èÁ¤ÀÔ´Ï´Ù.");
+    throw new Error("ë¹„í™œì„±í™”ëœ ê³„ì •ì…ë‹ˆë‹¤.");
   }
 
-  return {
-    authUser: data.user,
-    profile,
-  };
+  return {authUser:data.user,profile};
 }
 
-export async function logout() {
-  const { error } = await supabase.auth.signOut();
-
-  if (error) {
-    throw error;
-  }
+export async function logout(){
+  const {error}=await supabase.auth.signOut();
+  if(error) throw error;
 }

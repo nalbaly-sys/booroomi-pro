@@ -1,5 +1,10 @@
-import { FormEvent, useState } from "react";
-import { loginWithLoginId, logout } from "./lib/auth/auth";
+import { FormEvent, KeyboardEvent, useState } from "react";
+import {
+  loginWithLoginId,
+  logout,
+  supabase,
+  SUPABASE_URL,
+} from "./lib/auth/auth";
 
 type Tab = "drivers" | "orders" | "register";
 
@@ -15,6 +20,23 @@ type Profile = {
 
 type AccountManagerTab = "master" | "driver";
 
+type AccountUser = {
+  id: string;
+  auth_user_id: string;
+  login_id: string;
+  name: string;
+  phone: string | null;
+  role: "MASTER" | "DRIVER";
+  is_active: boolean;
+};
+
+type AccountForm = {
+  loginId: string;
+  password: string;
+  name: string;
+  phone: string;
+};
+
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
 
@@ -23,31 +45,77 @@ export default function App() {
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<Tab>("drivers");
+  const [activeTab, setActiveTab] =
+    useState<Tab>("drivers");
 
-  const [productName, setProductName] = useState("꽃배달");
-  const [routeInput, setRouteInput] = useState("");
-  const [routes, setRoutes] = useState<string[]>([]);
+  const [productName, setProductName] =
+    useState("꽃배달");
 
-  const [accountManagerOpen, setAccountManagerOpen] = useState(false);
+  const [routeInput, setRouteInput] =
+    useState("");
+
+  const [routes, setRoutes] =
+    useState<string[]>([]);
+
+  const [accountManagerOpen, setAccountManagerOpen] =
+    useState(false);
+
   const [accountManagerTab, setAccountManagerTab] =
     useState<AccountManagerTab>("master");
+
+  const [accountUsers, setAccountUsers] =
+    useState<AccountUser[]>([]);
+
+  const [accountLoading, setAccountLoading] =
+    useState(false);
+
+  const [accountError, setAccountError] =
+    useState("");
+
+  const [accountFormOpen, setAccountFormOpen] =
+    useState(false);
+
+  const [accountForm, setAccountForm] =
+    useState<AccountForm>({
+      loginId: "",
+      password: "",
+      name: "",
+      phone: "",
+    });
+
+  const [accountSaving, setAccountSaving] =
+    useState(false);
+
+  const [accountSaveMessage, setAccountSaveMessage] =
+    useState("");
+
+  // ==================================================
+  // 배송 경로
+  // ==================================================
 
   function addRoute() {
     const value = routeInput.trim();
 
     if (!value) return;
 
-    setRoutes((current) => [...current, value]);
+    setRoutes((current) => [
+      ...current,
+      value,
+    ]);
+
     setRouteInput("");
   }
 
   function removeRoute(index: number) {
-    setRoutes((current) => current.filter((_, i) => i !== index));
+    setRoutes((current) =>
+      current.filter(
+        (_, i) => i !== index,
+      ),
+    );
   }
 
   function handleRouteKeyDown(
-    event: React.KeyboardEvent<HTMLInputElement>,
+    event: KeyboardEvent<HTMLInputElement>,
   ) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -55,11 +123,19 @@ export default function App() {
     }
   }
 
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+  // ==================================================
+  // 로그인
+  // ==================================================
+
+  async function handleLogin(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
 
     if (!loginId.trim() || !password) {
-      setLoginError("관리자 ID와 비밀번호를 입력해주세요.");
+      setLoginError(
+        "관리자 ID와 비밀번호를 입력해주세요.",
+      );
       return;
     }
 
@@ -67,23 +143,24 @@ export default function App() {
     setLoginError("");
 
     try {
-      const result = await loginWithLoginId(loginId, password);
+      const result =
+        await loginWithLoginId(
+          loginId,
+          password,
+        );
 
-      /*
-       * 이 화면은 BooroomiAdmin 전용입니다.
-       * 따라서 MASTER 권한만 접근할 수 있습니다.
-       *
-       * DB 역할:
-       * MASTER    → ADMIN
-       * SUBMASTER → 일반 MASTER
-       * DRIVER    → 기사
-       */
       if (result.profile.role !== "MASTER") {
         await logout();
-        throw new Error("ADMIN 권한이 없는 계정입니다.");
+
+        throw new Error(
+          "ADMIN 권한이 없는 계정입니다.",
+        );
       }
 
-      setProfile(result.profile as Profile);
+      setProfile(
+        result.profile as Profile,
+      );
+
       setPassword("");
     } catch (error) {
       setLoginError(
@@ -96,11 +173,15 @@ export default function App() {
     }
   }
 
+  // ==================================================
+  // 로그아웃
+  // ==================================================
+
   async function handleLogout() {
     try {
       await logout();
     } catch {
-      // 화면은 로그인 화면으로 되돌린다.
+      // 로그인 화면으로 이동
     }
 
     setProfile(null);
@@ -108,23 +189,295 @@ export default function App() {
     setPassword("");
     setLoginError("");
     setAccountManagerOpen(false);
+    setAccountFormOpen(false);
   }
 
-  function openAccountManager(tab: AccountManagerTab) {
+  // ==================================================
+  // 계정 목록 조회
+  // ==================================================
+
+  async function loadAccountUsers() {
+    setAccountLoading(true);
+    setAccountError("");
+
+    try {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("users")
+        .select(
+          "id, auth_user_id, login_id, name, phone, role, is_active",
+        )
+        .in("role", [
+          "MASTER",
+          "DRIVER",
+        ])
+        .order("role", {
+          ascending: true,
+        })
+        .order("name", {
+          ascending: true,
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      setAccountUsers(
+        (data || []) as AccountUser[],
+      );
+    } catch (error) {
+      console.error(
+        "계정 목록 조회 오류:",
+        error,
+      );
+
+      setAccountError(
+        error instanceof Error
+          ? error.message
+          : "계정 목록을 불러오지 못했습니다.",
+      );
+    } finally {
+      setAccountLoading(false);
+    }
+  }
+
+  // ==================================================
+  // 계정관리 열기
+  // ==================================================
+
+  function openAccountManager(
+    tab: AccountManagerTab,
+  ) {
     setAccountManagerTab(tab);
     setAccountManagerOpen(true);
+    setAccountError("");
+    setAccountSaveMessage("");
+    setAccountFormOpen(false);
+
+    loadAccountUsers();
   }
+
+  // ==================================================
+  // 계정관리 닫기
+  // ==================================================
 
   function closeAccountManager() {
     setAccountManagerOpen(false);
+    setAccountFormOpen(false);
+    setAccountError("");
+    setAccountSaveMessage("");
   }
+
+  // ==================================================
+  // 계정 생성 폼 열기
+  // ==================================================
+
+  function openAccountForm() {
+    setAccountForm({
+      loginId: "",
+      password: "",
+      name: "",
+      phone: "",
+    });
+
+    setAccountSaveMessage("");
+    setAccountError("");
+    setAccountFormOpen(true);
+  }
+
+  // ==================================================
+  // 계정 생성 폼 닫기
+  // ==================================================
+
+  function closeAccountForm() {
+    if (accountSaving) return;
+
+    setAccountFormOpen(false);
+
+    setAccountForm({
+      loginId: "",
+      password: "",
+      name: "",
+      phone: "",
+    });
+  }
+
+  // ==================================================
+  // 계정 생성
+  // ==================================================
+
+  async function createAccount() {
+    const loginIdValue =
+      accountForm.loginId.trim();
+
+    const passwordValue =
+      accountForm.password;
+
+    const nameValue =
+      accountForm.name.trim();
+
+    const phoneValue =
+      accountForm.phone.trim();
+
+    if (!loginIdValue) {
+      setAccountError(
+        "로그인 ID를 입력해주세요.",
+      );
+      return;
+    }
+
+    if (!passwordValue) {
+      setAccountError(
+        "비밀번호를 입력해주세요.",
+      );
+      return;
+    }
+
+    if (passwordValue.length < 6) {
+      setAccountError(
+        "비밀번호는 6자 이상 입력해주세요.",
+      );
+      return;
+    }
+
+    if (!nameValue) {
+      setAccountError(
+        "이름을 입력해주세요.",
+      );
+      return;
+    }
+
+    setAccountSaving(true);
+    setAccountError("");
+    setAccountSaveMessage("");
+
+    try {
+      const {
+        data: sessionData,
+        error: sessionError,
+      } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken =
+        sessionData.session
+          ?.access_token;
+
+      if (!accessToken) {
+        throw new Error(
+          "로그인 세션이 없습니다. 다시 로그인해주세요.",
+        );
+      }
+
+      const role =
+        accountManagerTab === "master"
+          ? "MASTER"
+          : "DRIVER";
+
+      const response =
+        await fetch(
+          `${SUPABASE_URL}/functions/v1/admin-create-user`,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Authorization:
+                `Bearer ${accessToken}`,
+            },
+
+            body: JSON.stringify({
+              login_id: loginIdValue,
+              password: passwordValue,
+              name: nameValue,
+              phone:
+                phoneValue || null,
+              role,
+            }),
+          },
+        );
+
+      const result =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+        throw new Error(
+          result.message ||
+            result.error ||
+            "계정 생성에 실패했습니다.",
+        );
+      }
+
+      setAccountSaveMessage(
+        role === "MASTER"
+          ? "MASTER 계정이 생성되었습니다."
+          : "기사 계정이 생성되었습니다.",
+      );
+
+      setAccountFormOpen(false);
+
+      setAccountForm({
+        loginId: "",
+        password: "",
+        name: "",
+        phone: "",
+      });
+
+      await loadAccountUsers();
+    } catch (error) {
+      console.error(
+        "계정 생성 오류:",
+        error,
+      );
+
+      setAccountError(
+        error instanceof Error
+          ? error.message
+          : "계정 생성 중 오류가 발생했습니다.",
+      );
+    } finally {
+      setAccountSaving(false);
+    }
+  }
+
+  // ==================================================
+  // 현재 탭의 계정만 표시
+  // ==================================================
+
+  const visibleAccountUsers =
+    accountUsers.filter(
+      (user) =>
+        user.role ===
+        (accountManagerTab === "master"
+          ? "MASTER"
+          : "DRIVER"),
+    );
+
+  // ==================================================
+  // 로그인 화면
+  // ==================================================
 
   if (!profile) {
     return (
       <div className="login-overlay">
-        <form className="login-card" onSubmit={handleLogin}>
+        <form
+          className="login-card"
+          onSubmit={handleLogin}
+        >
           <div className="login-head">
-            <div className="login-crown">👑</div>
+            <div className="login-crown">
+              👑
+            </div>
 
             <div className="login-title">
               꽃배달 종합 관제 시스템
@@ -137,13 +490,19 @@ export default function App() {
 
           <div className="login-body">
             <div className="login-field">
-              <label htmlFor="loginId">관리자 ID</label>
+              <label htmlFor="loginId">
+                관리자 ID
+              </label>
 
               <input
                 id="loginId"
                 type="text"
                 value={loginId}
-                onChange={(event) => setLoginId(event.target.value)}
+                onChange={(event) =>
+                  setLoginId(
+                    event.target.value,
+                  )
+                }
                 placeholder="관리자 ID"
                 autoComplete="username"
                 disabled={loginLoading}
@@ -151,13 +510,19 @@ export default function App() {
             </div>
 
             <div className="login-field">
-              <label htmlFor="password">비밀번호</label>
+              <label htmlFor="password">
+                비밀번호
+              </label>
 
               <input
                 id="password"
                 type="password"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) =>
+                  setPassword(
+                    event.target.value,
+                  )
+                }
                 placeholder="비밀번호"
                 autoComplete="current-password"
                 disabled={loginLoading}
@@ -175,12 +540,15 @@ export default function App() {
               type="submit"
               disabled={loginLoading}
             >
-              {loginLoading ? "로그인 중..." : "로그인"}
+              {loginLoading
+                ? "로그인 중..."
+                : "로그인"}
             </button>
 
             {loginLoading && (
               <div className="login-loading">
-                사용자 정보를 확인하고 있습니다.
+                사용자 정보를 확인하고
+                있습니다.
               </div>
             )}
           </div>
@@ -189,25 +557,32 @@ export default function App() {
     );
   }
 
+  // ==================================================
+  // ADMIN 화면
+  // ==================================================
+
   return (
     <div className="app">
-      {/* =========================================
-          HEADER
-      ========================================= */}
+
+      {/* HEADER */}
       <header id="header">
-        <div>👑 꽃배달 실시간 종합 관제 센터</div>
+        <div>
+          👑 꽃배달 실시간 종합 관제 센터
+        </div>
 
         <span>
           [최고 관리자 ADMIN 권한 모드]
         </span>
       </header>
 
-      {/* =========================================
-          ADMIN CONTROL BAR
-      ========================================= */}
+      {/* ADMIN CONTROL BAR */}
       <div className="control-bar">
         <div className="control-user">
-          👑 <b>{profile.name || profile.login_id}</b>
+          👑{" "}
+          <b>
+            {profile.name ||
+              profile.login_id}
+          </b>
 
           <span>[ADMIN]</span>
         </div>
@@ -224,7 +599,9 @@ export default function App() {
           <button
             type="button"
             title="전체 새로고침"
-            onClick={() => window.location.reload()}
+            onClick={() =>
+              window.location.reload()
+            }
           >
             🔄
           </button>
@@ -233,7 +610,9 @@ export default function App() {
             type="button"
             title="알림 설정"
             onClick={() =>
-              alert("알림 설정 기능은 다음 단계에서 연결합니다.")
+              alert(
+                "알림 설정 기능은 다음 단계에서 연결합니다.",
+              )
             }
           >
             🔔
@@ -242,15 +621,26 @@ export default function App() {
           <button
             type="button"
             title="MASTER 계정 관리"
-            onClick={() => openAccountManager("master")}
+            onClick={() =>
+              openAccountManager(
+                "master",
+              )
+            }
             style={{
-              border: "1px solid #475569",
-              background: "#1e293b",
+              border:
+                "1px solid #475569",
+              background:
+                "#1e293b",
               color: "#fff",
-              padding: "8px 12px",
-              borderRadius: "7px",
-              cursor: "pointer",
+              padding:
+                "8px 12px",
+              borderRadius:
+                "7px",
+              cursor:
+                "pointer",
               fontWeight: 700,
+              whiteSpace:
+                "nowrap",
             }}
           >
             👥 계정 관리
@@ -260,106 +650,100 @@ export default function App() {
             type="button"
             className="logout-button"
             onClick={handleLogout}
+            style={{
+              whiteSpace:
+                "nowrap",
+            }}
           >
             로그아웃
           </button>
         </div>
       </div>
 
-      {/* =========================================
-          기존 Master.html 관제 요약 영역
-          위치:
-          CONTROL BAR
-             ↓
-          SUMMARY
-             ↓
-          MAP
-      ========================================= */}
+      {/* SUMMARY */}
       <section
         className="summary-wrap"
         style={{
           display: "flex",
-          gap: "12px",
-          padding: "12px",
-          background: "#0b0f19",
+          gap: "6px",
+          padding: "8px",
+          background:
+            "#0b0f19",
           marginTop: "-4px",
-          position: "relative",
+          position:
+            "relative",
           zIndex: 2,
-          flexWrap: "wrap",
+          flexWrap:
+            "nowrap",
+          width: "100%",
+          boxSizing:
+            "border-box",
+          overflow:
+            "hidden",
         }}
       >
-        <div
-          className="summary-card summary-order"
-          style={{ minWidth: "130px" }}
-        >
-          <div className="summary-title">
-            📦 오늘오더
-          </div>
+        {[
+          ["📦 오늘오더", "summary-order"],
+          ["❌ 거절됨", "summary-reject"],
+          ["⏳ 미확인", "summary-uncheck"],
+          ["🚚 배송중", "summary-ing"],
+          ["✅ 배송완료", "summary-done"],
+        ].map(
+          ([title, className]) => (
+            <div
+              key={title}
+              className={`summary-card ${className}`}
+              style={{
+                flex:
+                  "1 1 0",
+                minWidth: 0,
+                width: 0,
+                padding:
+                  "10px 4px",
+                boxSizing:
+                  "border-box",
+                overflow:
+                  "hidden",
+              }}
+            >
+              <div
+                className="summary-title"
+                style={{
+                  whiteSpace:
+                    "nowrap",
+                  overflow:
+                    "hidden",
+                  textOverflow:
+                    "ellipsis",
+                  fontSize:
+                    "clamp(9px, 2.5vw, 13px)",
+                }}
+              >
+                {title}
+              </div>
 
-          <div className="summary-value">
-            0
-          </div>
-        </div>
-
-        <div
-          className="summary-card summary-reject"
-          style={{ minWidth: "130px" }}
-        >
-          <div className="summary-title">
-            ❌ 거절됨
-          </div>
-
-          <div className="summary-value">
-            0
-          </div>
-        </div>
-
-        <div
-          className="summary-card summary-uncheck"
-          style={{ minWidth: "130px" }}
-        >
-          <div className="summary-title">
-            ⏳ 미확인
-          </div>
-
-          <div className="summary-value">
-            0
-          </div>
-        </div>
-
-        <div
-          className="summary-card summary-ing"
-          style={{ minWidth: "130px" }}
-        >
-          <div className="summary-title">
-            🚚 배송중
-          </div>
-
-          <div className="summary-value">
-            0
-          </div>
-        </div>
-
-        <div
-          className="summary-card summary-done"
-          style={{ minWidth: "130px" }}
-        >
-          <div className="summary-title">
-            ✅ 배송완료
-          </div>
-
-          <div className="summary-value">
-            0
-          </div>
-        </div>
+              <div
+                className="summary-value"
+                style={{
+                  fontSize:
+                    "clamp(16px, 5vw, 26px)",
+                  marginTop:
+                    "4px",
+                }}
+              >
+                0
+              </div>
+            </div>
+          ),
+        )}
       </section>
 
-      {/* =========================================
-          MAP
-      ========================================= */}
+      {/* MAP */}
       <section className="map-section">
         <div className="map-placeholder">
-          <div className="map-icon">🗺️</div>
+          <div className="map-icon">
+            🗺️
+          </div>
 
           <div className="map-title">
             실시간 기사 위치 관제 지도
@@ -376,25 +760,29 @@ export default function App() {
               color: "#64748b",
             }}
           >
-            Supabase GPS 연결은 다음 단계에서 진행합니다.
+            Supabase GPS 연결은
+            다음 단계에서 진행합니다.
           </small>
         </div>
       </section>
 
-      {/* =========================================
-          MAIN
-      ========================================= */}
+      {/* MAIN */}
       <div className="container">
-        {/* =======================================
-            TABS
-        ======================================= */}
+
+        {/* TABS */}
         <div className="tab-bar">
           <button
             type="button"
             className={`tab-btn ${
-              activeTab === "drivers" ? "active" : ""
+              activeTab === "drivers"
+                ? "active"
+                : ""
             }`}
-            onClick={() => setActiveTab("drivers")}
+            onClick={() =>
+              setActiveTab(
+                "drivers",
+              )
+            }
           >
             🚖 현장기사 출근부
           </button>
@@ -402,9 +790,15 @@ export default function App() {
           <button
             type="button"
             className={`tab-btn ${
-              activeTab === "orders" ? "active" : ""
+              activeTab === "orders"
+                ? "active"
+                : ""
             }`}
-            onClick={() => setActiveTab("orders")}
+            onClick={() =>
+              setActiveTab(
+                "orders",
+              )
+            }
           >
             📋 종합 오더 현황
           </button>
@@ -412,21 +806,27 @@ export default function App() {
           <button
             type="button"
             className={`tab-btn ${
-              activeTab === "register" ? "active" : ""
+              activeTab === "register"
+                ? "active"
+                : ""
             }`}
-            onClick={() => setActiveTab("register")}
+            onClick={() =>
+              setActiveTab(
+                "register",
+              )
+            }
           >
             ✍️ 신규 오더 배차
           </button>
         </div>
 
-        {/* =======================================
-            DRIVER TAB
-        ======================================= */}
-        {activeTab === "drivers" && (
+        {/* DRIVER TAB */}
+        {activeTab ===
+          "drivers" && (
           <section className="tab-content">
             <div className="section-title">
-              📊 실시간 현장 기사 출근 및 위치 현황
+              📊 실시간 현장 기사
+              출근 및 위치 현황
             </div>
 
             <div className="empty-board">
@@ -435,24 +835,28 @@ export default function App() {
               </div>
 
               <div>
-                현재 표시할 근무 기사가 없습니다.
+                현재 표시할
+                근무 기사가
+                없습니다.
               </div>
 
               <small>
-                기사 출근 상태와 전체 기사 GPS는
-                Supabase 연결 후 표시됩니다.
+                기사 출근 상태와
+                전체 기사 GPS는
+                Supabase 연결 후
+                표시됩니다.
               </small>
             </div>
           </section>
         )}
 
-        {/* =======================================
-            ORDERS TAB
-        ======================================= */}
-        {activeTab === "orders" && (
+        {/* ORDERS TAB */}
+        {activeTab ===
+          "orders" && (
           <section className="tab-content">
             <div className="section-title">
-              📊 실시간 오더 관제 현황판
+              📊 실시간 오더
+              관제 현황판
 
               <span className="section-subtitle">
                 10초 자동 갱신
@@ -490,23 +894,26 @@ export default function App() {
               </div>
 
               <div>
-                현재 표시할 오더가 없습니다.
+                현재 표시할
+                오더가 없습니다.
               </div>
 
               <small>
-                오더 데이터는 Supabase 연결 후 표시됩니다.
+                오더 데이터는
+                Supabase 연결 후
+                표시됩니다.
               </small>
             </div>
           </section>
         )}
 
-        {/* =======================================
-            REGISTER TAB
-        ======================================= */}
-        {activeTab === "register" && (
+        {/* REGISTER TAB */}
+        {activeTab ===
+          "register" && (
           <section className="tab-content">
             <div className="section-title">
-              ✍️ 신규 복합 오더 발송 등록
+              ✍️ 신규 복합 오더
+              발송 등록
             </div>
 
             <div className="form-box">
@@ -520,7 +927,9 @@ export default function App() {
                   className="input-text"
                   value={productName}
                   onChange={(event) =>
-                    setProductName(event.target.value)
+                    setProductName(
+                      event.target.value,
+                    )
                   }
                   placeholder="상품명을 입력하세요"
                 />
@@ -536,9 +945,13 @@ export default function App() {
                     className="input-text"
                     value={routeInput}
                     onChange={(event) =>
-                      setRouteInput(event.target.value)
+                      setRouteInput(
+                        event.target.value,
+                      )
                     }
-                    onKeyDown={handleRouteKeyDown}
+                    onKeyDown={
+                      handleRouteKeyDown
+                    }
                     placeholder="배송지를 입력하세요"
                   />
 
@@ -552,31 +965,43 @@ export default function App() {
                 </div>
 
                 <div className="added-route-list">
-                  {routes.length === 0 ? (
+                  {routes.length ===
+                  0 ? (
                     <div className="empty-route-msg">
-                      배송 경로를 추가해주세요.
+                      배송 경로를
+                      추가해주세요.
                     </div>
                   ) : (
-                    routes.map((route, index) => (
-                      <div
-                        className="route-chip"
-                        key={`${route}-${index}`}
-                      >
-                        <span>
-                          📍 {index + 1}. {route}
-                        </span>
-
-                        <button
-                          type="button"
-                          className="btn-del-chip"
-                          onClick={() =>
-                            removeRoute(index)
-                          }
+                    routes.map(
+                      (
+                        route,
+                        index,
+                      ) => (
+                        <div
+                          className="route-chip"
+                          key={`${route}-${index}`}
                         >
-                          ×
-                        </button>
-                      </div>
-                    ))
+                          <span>
+                            📍{" "}
+                            {index + 1}.
+                            {" "}
+                            {route}
+                          </span>
+
+                          <button
+                            type="button"
+                            className="btn-del-chip"
+                            onClick={() =>
+                              removeRoute(
+                                index,
+                              )
+                            }
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ),
+                    )
                   )}
                 </div>
               </div>
@@ -629,63 +1054,94 @@ export default function App() {
                   )
                 }
               >
-                🚀 관제판에 오더 등록발송
+                🚀 관제판에 오더
+                등록발송
               </button>
             </div>
           </section>
         )}
       </div>
 
-      {/* =========================================
-          ADMIN ACCOUNT MANAGER MODAL
-      ========================================= */}
+      {/* ACCOUNT MANAGER */}
       {accountManagerOpen && (
         <div
           style={{
-            position: "fixed",
+            position:
+              "fixed",
             inset: 0,
-            background: "rgba(0,0,0,.78)",
-            zIndex: 100000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            boxSizing: "border-box",
+            background:
+              "rgba(0,0,0,.78)",
+            zIndex:
+              100000,
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            padding:
+              "12px",
+            boxSizing:
+              "border-box",
           }}
-          onClick={closeAccountManager}
+          onClick={
+            closeAccountManager
+          }
         >
           <div
             style={{
-              width: "100%",
-              maxWidth: "720px",
-              maxHeight: "85vh",
-              overflow: "hidden",
-              background: "#1e293b",
-              border: "1px solid #475569",
-              borderRadius: "16px",
-              boxShadow: "0 25px 80px rgba(0,0,0,.65)",
-              color: "#fff",
+              width:
+                "100%",
+              maxWidth:
+                "720px",
+              maxHeight:
+                "90vh",
+              overflow:
+                "hidden",
+              background:
+                "#1e293b",
+              border:
+                "1px solid #475569",
+              borderRadius:
+                "16px",
+              boxShadow:
+                "0 25px 80px rgba(0,0,0,.65)",
+              color:
+                "#fff",
+              boxSizing:
+                "border-box",
             }}
             onClick={(event) =>
               event.stopPropagation()
             }
           >
+
             {/* MODAL HEADER */}
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "16px 18px",
-                background: "#0f172a",
-                borderBottom: "1px solid #334155",
+                display:
+                  "flex",
+                alignItems:
+                  "center",
+                justifyContent:
+                  "space-between",
+                gap:
+                  "10px",
+                padding:
+                  "14px 16px",
+                background:
+                  "#0f172a",
+                borderBottom:
+                  "1px solid #334155",
               }}
             >
               <div>
                 <div
                   style={{
-                    fontSize: "18px",
-                    fontWeight: 900,
+                    fontSize:
+                      "18px",
+                    fontWeight:
+                      900,
                   }}
                 >
                   👥 계정 관리
@@ -693,9 +1149,12 @@ export default function App() {
 
                 <div
                   style={{
-                    fontSize: "11px",
-                    color: "#94a3b8",
-                    marginTop: "4px",
+                    fontSize:
+                      "11px",
+                    color:
+                      "#94a3b8",
+                    marginTop:
+                      "4px",
                   }}
                 >
                   ADMIN 전용 계정 관리
@@ -704,13 +1163,20 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={closeAccountManager}
+                onClick={
+                  closeAccountManager
+                }
                 style={{
-                  border: 0,
-                  background: "transparent",
-                  color: "#94a3b8",
-                  fontSize: "28px",
-                  cursor: "pointer",
+                  border:
+                    0,
+                  background:
+                    "transparent",
+                  color:
+                    "#94a3b8",
+                  fontSize:
+                    "28px",
+                  cursor:
+                    "pointer",
                 }}
               >
                 ×
@@ -720,34 +1186,51 @@ export default function App() {
             {/* MODAL TABS */}
             <div
               style={{
-                display: "flex",
-                background: "#172033",
-                borderBottom: "1px solid #334155",
+                display:
+                  "flex",
+                width:
+                  "100%",
+                background:
+                  "#172033",
+                borderBottom:
+                  "1px solid #334155",
               }}
             >
               <button
                 type="button"
-                onClick={() =>
-                  setAccountManagerTab("master")
-                }
+                onClick={() => {
+                  setAccountManagerTab(
+                    "master",
+                  );
+                  setAccountError("");
+                  setAccountSaveMessage("");
+                }}
                 style={{
-                  flex: 1,
-                  padding: "14px",
-                  border: 0,
+                  flex:
+                    "1 1 0",
+                  padding:
+                    "12px 6px",
+                  border:
+                    0,
                   borderBottom:
-                    accountManagerTab === "master"
+                    accountManagerTab ===
+                    "master"
                       ? "3px solid #6366f1"
                       : "3px solid transparent",
                   background:
-                    accountManagerTab === "master"
+                    accountManagerTab ===
+                    "master"
                       ? "#1e293b"
                       : "transparent",
                   color:
-                    accountManagerTab === "master"
+                    accountManagerTab ===
+                    "master"
                       ? "#fff"
                       : "#94a3b8",
-                  fontWeight: 800,
-                  cursor: "pointer",
+                  fontWeight:
+                    800,
+                  cursor:
+                    "pointer",
                 }}
               >
                 👑 MASTER 관리
@@ -755,27 +1238,39 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() =>
-                  setAccountManagerTab("driver")
-                }
+                onClick={() => {
+                  setAccountManagerTab(
+                    "driver",
+                  );
+                  setAccountError("");
+                  setAccountSaveMessage("");
+                }}
                 style={{
-                  flex: 1,
-                  padding: "14px",
-                  border: 0,
+                  flex:
+                    "1 1 0",
+                  padding:
+                    "12px 6px",
+                  border:
+                    0,
                   borderBottom:
-                    accountManagerTab === "driver"
+                    accountManagerTab ===
+                    "driver"
                       ? "3px solid #3b82f6"
                       : "3px solid transparent",
                   background:
-                    accountManagerTab === "driver"
+                    accountManagerTab ===
+                    "driver"
                       ? "#1e293b"
                       : "transparent",
                   color:
-                    accountManagerTab === "driver"
+                    accountManagerTab ===
+                    "driver"
                       ? "#fff"
                       : "#94a3b8",
-                  fontWeight: 800,
-                  cursor: "pointer",
+                  fontWeight:
+                    800,
+                  cursor:
+                    "pointer",
                 }}
               >
                 🚚 기사 관리
@@ -785,196 +1280,599 @@ export default function App() {
             {/* MODAL BODY */}
             <div
               style={{
-                padding: "20px",
-                overflowY: "auto",
-                maxHeight: "calc(85vh - 130px)",
+                padding:
+                  "16px",
+                overflowY:
+                  "auto",
+                maxHeight:
+                  "calc(90vh - 125px)",
+                boxSizing:
+                  "border-box",
               }}
             >
-              {accountManagerTab === "master" && (
+
+              {/* 제목 */}
+              <div
+                style={{
+                  display:
+                    "flex",
+                  justifyContent:
+                    "space-between",
+                  alignItems:
+                    "center",
+                  gap:
+                    "10px",
+                  marginBottom:
+                    "15px",
+                }}
+              >
                 <div>
                   <div
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "10px",
-                      marginBottom: "15px",
+                      fontSize:
+                        "16px",
+                      fontWeight:
+                        900,
                     }}
                   >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: "16px",
-                          fontWeight: 900,
-                        }}
-                      >
-                        👑 MASTER 계정
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          color: "#94a3b8",
-                          marginTop: "4px",
-                        }}
-                      >
-                        일반 MASTER 계정을 ADMIN에서 관리합니다.
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        alert(
-                          "MASTER 계정 생성 기능은 다음 단계에서 Supabase와 연결합니다.",
-                        )
-                      }
-                      style={{
-                        border: 0,
-                        borderRadius: "7px",
-                        background: "#4f46e5",
-                        color: "#fff",
-                        padding: "10px 14px",
-                        fontWeight: 800,
-                        cursor: "pointer",
-                      }}
-                    >
-                      ➕ MASTER 생성
-                    </button>
+                    {accountManagerTab ===
+                    "master"
+                      ? "👑 MASTER 계정"
+                      : "🚚 기사 계정"}
                   </div>
 
                   <div
                     style={{
-                      background: "#0f172a",
-                      border: "1px solid #334155",
-                      borderRadius: "10px",
-                      padding: "18px",
-                      textAlign: "center",
+                      fontSize:
+                        "12px",
+                      color:
+                        "#94a3b8",
+                      marginTop:
+                        "4px",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: "32px",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      👑
-                    </div>
+                    {accountManagerTab ===
+                    "master"
+                      ? "ADMIN에서 MASTER 계정을 관리합니다."
+                      : "ADMIN에서 전체 기사 계정을 관리합니다."}
+                  </div>
+                </div>
 
-                    <div
-                      style={{
-                        fontWeight: 800,
-                        color: "#e2e8f0",
-                      }}
-                    >
-                      등록된 MASTER 계정을 불러오는 중입니다.
-                    </div>
+                <button
+                  type="button"
+                  onClick={
+                    openAccountForm
+                  }
+                  style={{
+                    border:
+                      0,
+                    borderRadius:
+                      "7px",
+                    background:
+                      accountManagerTab ===
+                      "master"
+                        ? "#4f46e5"
+                        : "#2563eb",
+                    color:
+                      "#fff",
+                    padding:
+                      "9px 10px",
+                    fontWeight:
+                      800,
+                    cursor:
+                      "pointer",
+                    whiteSpace:
+                      "nowrap",
+                  }}
+                >
+                  ➕{" "}
+                  {accountManagerTab ===
+                  "master"
+                    ? "MASTER 생성"
+                    : "기사 생성"}
+                </button>
+              </div>
 
-                    <div
+              {/* 메시지 */}
+              {accountError && (
+                <div
+                  style={{
+                    marginBottom:
+                      "12px",
+                    padding:
+                      "10px 12px",
+                    borderRadius:
+                      "8px",
+                    background:
+                      "rgba(239,68,68,.12)",
+                    border:
+                      "1px solid rgba(239,68,68,.4)",
+                    color:
+                      "#fca5a5",
+                    fontSize:
+                      "13px",
+                  }}
+                >
+                  {accountError}
+                </div>
+              )}
+
+              {accountSaveMessage && (
+                <div
+                  style={{
+                    marginBottom:
+                      "12px",
+                    padding:
+                      "10px 12px",
+                    borderRadius:
+                      "8px",
+                    background:
+                      "rgba(34,197,94,.12)",
+                    border:
+                      "1px solid rgba(34,197,94,.4)",
+                    color:
+                      "#86efac",
+                    fontSize:
+                      "13px",
+                  }}
+                >
+                  {accountSaveMessage}
+                </div>
+              )}
+
+              {/* 계정 생성 폼 */}
+              {accountFormOpen && (
+                <div
+                  style={{
+                    marginBottom:
+                      "16px",
+                    padding:
+                      "14px",
+                    background:
+                      "#0f172a",
+                    border:
+                      "1px solid #334155",
+                    borderRadius:
+                      "10px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight:
+                        900,
+                      marginBottom:
+                        "12px",
+                    }}
+                  >
+                    {accountManagerTab ===
+                    "master"
+                      ? "👑 MASTER 계정 생성"
+                      : "🚚 기사 계정 생성"}
+                  </div>
+
+                  <div
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(2, minmax(0, 1fr))",
+                      gap:
+                        "10px",
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={
+                        accountForm.loginId
+                      }
+                      onChange={(
+                        event,
+                      ) =>
+                        setAccountForm(
+                          (
+                            current,
+                          ) => ({
+                            ...current,
+                            loginId:
+                              event
+                                .target
+                                .value,
+                          }),
+                        )
+                      }
+                      placeholder="로그인 ID"
+                      disabled={
+                        accountSaving
+                      }
                       style={{
-                        marginTop: "6px",
-                        fontSize: "12px",
-                        color: "#64748b",
+                        width:
+                          "100%",
+                        boxSizing:
+                          "border-box",
+                        padding:
+                          "10px",
+                        border:
+                          "1px solid #475569",
+                        borderRadius:
+                          "7px",
+                        background:
+                          "#1e293b",
+                        color:
+                          "#fff",
+                      }}
+                    />
+
+                    <input
+                      type="password"
+                      value={
+                        accountForm.password
+                      }
+                      onChange={(
+                        event,
+                      ) =>
+                        setAccountForm(
+                          (
+                            current,
+                          ) => ({
+                            ...current,
+                            password:
+                              event
+                                .target
+                                .value,
+                          }),
+                        )
+                      }
+                      placeholder="비밀번호 6자 이상"
+                      disabled={
+                        accountSaving
+                      }
+                      style={{
+                        width:
+                          "100%",
+                        boxSizing:
+                          "border-box",
+                        padding:
+                          "10px",
+                        border:
+                          "1px solid #475569",
+                        borderRadius:
+                          "7px",
+                        background:
+                          "#1e293b",
+                        color:
+                          "#fff",
+                      }}
+                    />
+
+                    <input
+                      type="text"
+                      value={
+                        accountForm.name
+                      }
+                      onChange={(
+                        event,
+                      ) =>
+                        setAccountForm(
+                          (
+                            current,
+                          ) => ({
+                            ...current,
+                            name:
+                              event
+                                .target
+                                .value,
+                          }),
+                        )
+                      }
+                      placeholder="이름"
+                      disabled={
+                        accountSaving
+                      }
+                      style={{
+                        width:
+                          "100%",
+                        boxSizing:
+                          "border-box",
+                        padding:
+                          "10px",
+                        border:
+                          "1px solid #475569",
+                        borderRadius:
+                          "7px",
+                        background:
+                          "#1e293b",
+                        color:
+                          "#fff",
+                      }}
+                    />
+
+                    <input
+                      type="text"
+                      value={
+                        accountForm.phone
+                      }
+                      onChange={(
+                        event,
+                      ) =>
+                        setAccountForm(
+                          (
+                            current,
+                          ) => ({
+                            ...current,
+                            phone:
+                              event
+                                .target
+                                .value,
+                          }),
+                        )
+                      }
+                      placeholder="전화번호"
+                      disabled={
+                        accountSaving
+                      }
+                      style={{
+                        width:
+                          "100%",
+                        boxSizing:
+                          "border-box",
+                        padding:
+                          "10px",
+                        border:
+                          "1px solid #475569",
+                        borderRadius:
+                          "7px",
+                        background:
+                          "#1e293b",
+                        color:
+                          "#fff",
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      display:
+                        "flex",
+                      justifyContent:
+                        "flex-end",
+                      gap:
+                        "8px",
+                      marginTop:
+                        "12px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={
+                        closeAccountForm
+                      }
+                      disabled={
+                        accountSaving
+                      }
+                      style={{
+                        padding:
+                          "9px 12px",
+                        border:
+                          "1px solid #475569",
+                        borderRadius:
+                          "7px",
+                        background:
+                          "#1e293b",
+                        color:
+                          "#cbd5e1",
+                        cursor:
+                          "pointer",
                       }}
                     >
-                      Supabase 계정 관리 기능 연결 예정
-                    </div>
+                      취소
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={
+                        createAccount
+                      }
+                      disabled={
+                        accountSaving
+                      }
+                      style={{
+                        padding:
+                          "9px 14px",
+                        border:
+                          0,
+                        borderRadius:
+                          "7px",
+                        background:
+                          accountManagerTab ===
+                          "master"
+                            ? "#4f46e5"
+                            : "#2563eb",
+                        color:
+                          "#fff",
+                        fontWeight:
+                          800,
+                        cursor:
+                          "pointer",
+                      }}
+                    >
+                      {accountSaving
+                        ? "생성 중..."
+                        : "계정 생성"}
+                    </button>
                   </div>
                 </div>
               )}
 
-              {accountManagerTab === "driver" && (
-                <div>
+              {/* 계정 목록 */}
+              <div>
+                {accountLoading ? (
                   <div
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "10px",
-                      marginBottom: "15px",
+                      padding:
+                        "30px 15px",
+                      textAlign:
+                        "center",
+                      color:
+                        "#94a3b8",
                     }}
                   >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: "16px",
-                          fontWeight: 900,
-                        }}
-                      >
-                        🚚 기사 계정
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          color: "#94a3b8",
-                          marginTop: "4px",
-                        }}
-                      >
-                        ADMIN에서 전체 기사 계정을 관리합니다.
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        alert(
-                          "기사 계정 생성 기능은 다음 단계에서 Supabase와 연결합니다.",
-                        )
-                      }
-                      style={{
-                        border: 0,
-                        borderRadius: "7px",
-                        background: "#2563eb",
-                        color: "#fff",
-                        padding: "10px 14px",
-                        fontWeight: 800,
-                        cursor: "pointer",
-                      }}
-                    >
-                      ➕ 기사 생성
-                    </button>
+                    계정 목록을
+                    불러오는 중입니다...
                   </div>
-
+                ) : visibleAccountUsers.length ===
+                  0 ? (
                   <div
                     style={{
-                      background: "#0f172a",
-                      border: "1px solid #334155",
-                      borderRadius: "10px",
-                      padding: "18px",
-                      textAlign: "center",
+                      padding:
+                        "30px 15px",
+                      textAlign:
+                        "center",
+                      background:
+                        "#0f172a",
+                      border:
+                        "1px solid #334155",
+                      borderRadius:
+                        "10px",
+                      color:
+                        "#94a3b8",
                     }}
                   >
                     <div
                       style={{
-                        fontSize: "32px",
-                        marginBottom: "8px",
+                        fontSize:
+                          "32px",
+                        marginBottom:
+                          "8px",
                       }}
                     >
-                      🚚
+                      {accountManagerTab ===
+                      "master"
+                        ? "👑"
+                        : "🚚"}
                     </div>
 
                     <div
                       style={{
-                        fontWeight: 800,
-                        color: "#e2e8f0",
+                        color:
+                          "#e2e8f0",
+                        fontWeight:
+                          800,
                       }}
                     >
-                      등록된 기사 계정을 불러오는 중입니다.
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        fontSize: "12px",
-                        color: "#64748b",
-                      }}
-                    >
-                      Supabase 기사 계정 관리 기능 연결 예정
+                      등록된{" "}
+                      {accountManagerTab ===
+                      "master"
+                        ? "MASTER"
+                        : "기사"}{" "}
+                      계정이 없습니다.
                     </div>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div
+                    style={{
+                      display:
+                        "flex",
+                      flexDirection:
+                        "column",
+                      gap:
+                        "8px",
+                    }}
+                  >
+                    {visibleAccountUsers.map(
+                      (user) => (
+                        <div
+                          key={
+                            user.id
+                          }
+                          style={{
+                            padding:
+                              "12px",
+                            background:
+                              "#0f172a",
+                            border:
+                              "1px solid #334155",
+                            borderRadius:
+                              "10px",
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            justifyContent:
+                              "space-between",
+                            gap:
+                              "10px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              minWidth:
+                                0,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontWeight:
+                                  900,
+                                color:
+                                  "#f8fafc",
+                              }}
+                            >
+                              {user.name ||
+                                "-"}
+                            </div>
+
+                            <div
+                              style={{
+                                marginTop:
+                                  "4px",
+                                fontSize:
+                                  "12px",
+                                color:
+                                  "#94a3b8",
+                              }}
+                            >
+                              ID:{" "}
+                              {
+                                user.login_id
+                              }
+                              {" · "}
+                              {user.phone ||
+                                "전화번호 없음"}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              flexShrink:
+                                0,
+                              padding:
+                                "5px 8px",
+                              borderRadius:
+                                "999px",
+                              fontSize:
+                                "11px",
+                              fontWeight:
+                                800,
+                              background:
+                                user.is_active
+                                  ? "rgba(34,197,94,.15)"
+                                  : "rgba(100,116,139,.2)",
+                              color:
+                                user.is_active
+                                  ? "#86efac"
+                                  : "#94a3b8",
+                            }}
+                          >
+                            {user.is_active
+                              ? "활성"
+                              : "비활성"}
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -436,6 +436,48 @@ export default function App() {
     }
   }
 
+  async function changeAccountStatus(user: AccountUser) {
+  const nextActive = !user.is_active;
+  const actionText = nextActive ? "재활성화" : "강제탈퇴";
+
+  if (!window.confirm(`${user.name || user.login_id} 계정을 ${actionText}하시겠습니까?`)) return;
+
+  setAccountError("");
+  setAccountSaveMessage("");
+
+  try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) throw new Error("로그인 세션이 없습니다. 다시 로그인해주세요.");
+
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL || "https://enwyqdekqfpuurutqjdd.supabase.co"}/functions/v1/account-status`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        user_id: user.id,
+        is_active: nextActive,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || result.error || `계정 ${actionText}에 실패했습니다.`);
+    }
+
+    setAccountSaveMessage(`${user.name || user.login_id} 계정이 ${actionText}되었습니다.`);
+    await loadAccountUsers();
+  } catch (error) {
+    console.error("계정 상태 변경 오류:", error);
+    setAccountError(error instanceof Error ? error.message : `계정 ${actionText} 중 오류가 발생했습니다.`);
+  }
+}
+
   const accountRole =
     accountManagerTab === "admin"
       ? "MASTER"
@@ -1470,25 +1512,10 @@ export default function App() {
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          openPasswordReset(user)
-                        }
-                        style={{
-                          border: "1px solid #475569",
-                          borderRadius: "7px",
-                          background: "#1e293b",
-                          color: "#fff",
-                          padding: "8px 10px",
-                          fontWeight: 800,
-                          cursor: "pointer",
-                          whiteSpace: "nowrap",
-                          flexShrink: 0,
-                        }}
-                      >
-                        🔑 비밀번호 변경
-                      </button>
+                      <div style={{display:"flex",gap:"6px",alignItems:"center",flexShrink:0}}>
+                        <button type="button" onClick={() => openPasswordReset(user)} style={{border:"1px solid #475569",borderRadius:"7px",background:"#1e293b",color:"#fff",padding:"8px 10px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>🔑 비밀번호</button>
+                        <button type="button" onClick={() => changeAccountStatus(user)} style={{border:"1px solid #7f1d1d",borderRadius:"7px",background:user.is_active ? "#451a1a" : "#14532d",color:"#fff",padding:"8px 10px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{user.is_active ? "🚫 강제탈퇴" : "♻️ 재활성화"}</button>
+                      </div>
                     </div>
                   ))}
                 </div>

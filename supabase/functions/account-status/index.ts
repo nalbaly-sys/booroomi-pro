@@ -85,7 +85,11 @@ Deno.serve(async(req)=>{
 
     if(targetUser.id===currentUser.id){
       if(requestedActive){
-        throw new Error("현재 계정은 여기서 활성화할 수 없습니다.");
+        throw new Error("본인 계정은 여기서 재활성화할 수 없습니다.");
+      }
+
+      if(!["SUBMASTER","DRIVER"].includes(currentUser.role)){
+        throw new Error("ADMIN 계정은 본인 회원탈퇴를 사용할 수 없습니다.");
       }
     }else{
       if(currentUser.role==="MASTER"){

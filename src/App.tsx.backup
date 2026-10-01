@@ -1,7 +1,5 @@
 import { FormEvent, KeyboardEvent, useState } from "react";
 import { loginWithLoginId, logout, supabase } from "./lib/auth/auth";
-import MasterApp from "./MasterApp";
-import DriverApp from "./DriverApp";
 
 type Tab = "drivers" | "orders" | "register";
 type Profile = {
@@ -103,10 +101,11 @@ export default function App() {
     try {
       const result = await loginWithLoginId(loginId, password);
 
-      if (!["MASTER","SUBMASTER","DRIVER"].includes(result.profile.role)) {
+      if (result.profile.role !== "MASTER") {
         await logout();
-        throw new Error("접근 권한이 없는 계정입니다.");
+        throw new Error("ADMIN 권한이 없는 계정입니다.");
       }
+
       setProfile(result.profile as Profile);
       setPassword("");
     } catch (error) {
@@ -490,8 +489,6 @@ export default function App() {
     (user) => user.role === accountRole,
   );
 
-  if (profile?.role === "SUBMASTER") return <MasterApp profile={profile} onLogout={handleLogout} />;
-  if (profile?.role === "DRIVER") return <DriverApp profile={profile} onLogout={handleLogout} />;
   if (!profile) {
     return (
       <div className="login-overlay">
